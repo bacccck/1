@@ -1,8 +1,29 @@
 import streamlit as st
 
+# 🖥️ إعداد الصفحة وتحديد العنوان والأيقونة
+st.set_page_config(page_title="وكيل السفر الذكي", page_icon="✈️")
+
+# 🖥️ كود CSS لتغيير اتجاه الصفحة ليصبح من اليمين إلى اليسار (RTL)
+st.markdown("""
+<style>
+    .stApp {
+        direction: rtl;
+    }
+    p, div, input, select, label, h1, h2, h3 {
+        text-align: right !important;
+    }
+    /* ضبط محاذاة أزرار البحث والحجز لليمين */
+    .stButton>button {
+        display: block;
+        margin-right: 0;
+        margin-left: auto;
+    }
+</style>
+""", unsafe_allow_html=True)
+
 # ==========================================
 # 🛠️ القسم الأول: الأدوات (Tools)
-# وظيفتها: جلب البيانات فقط (هنا نستخدم بيانات وهمية للتجربة)
+# وظيفتها: جلب البيانات فقط (بيانات وهمية للتجربة المبدئية)
 # ==========================================
 
 def get_best_direct_flights(origin, destination, date_out):
@@ -24,32 +45,32 @@ def get_shortest_transit_flight(origin, destination, date_out):
     return {"id": "T3", "type": "ترانزيت سريع", "airline": "الخطوط القطرية", "price": 1500, "duration": "4 ساعات"}
 
 def generate_google_flight_url(flight_id, origin, destination, date_out):
-    """أداة تولد رابط حجز (ديناميكي) وهمي للتجربة"""
+    """أداة تولد رابط حجز ديناميكي وهمي للتجربة"""
     return f"https://www.google.com/travel/flights?q={origin}-to-{destination}-on-{date_out}"
 
 
 # ==========================================
 # 🧠 القسم الثاني: المنطق (Logic)
-# وظيفته: استلام الطلب، تشغيل الأدوات، فلترة النتائج
+# وظيفته: استلام الطلب، تشغيل الأدوات، وفلترة النتائج وترتيبها
 # ==========================================
 
 def process_flight_search(origin, destination, date_out, date_return, trip_type, cabin_class):
     results = []
     
-    # 1. تشغيل الأدوات
+    # 1. استدعاء الأدوات لجلب البيانات
     direct_flights = get_best_direct_flights(origin, destination, date_out)
     transit_flights = get_best_transit_flights(origin, destination, date_out)
     fastest_transit = get_shortest_transit_flight(origin, destination, date_out)
     
-    # 2. تجميع النتائج
+    # 2. تجميع النتائج في قائمة واحدة
     results.extend(direct_flights)
     results.extend(transit_flights)
     results.append(fastest_transit)
     
-    # 3. اختيار أفضل 3 نتائج (نرتبها حسب السعر الأقل)
+    # 3. اختيار أفضل 3 نتائج بناءً على السعر الأقل
     top_3_flights = sorted(results, key=lambda x: x['price'])[:3]
     
-    # 4. جلب الروابط لكل رحلة
+    # 4. توليد الروابط المنفصلة لكل رحلة من الثلاثة
     for flight in top_3_flights:
         url = generate_google_flight_url(flight['id'], origin, destination, date_out)
         flight['booking_url'] = url
@@ -59,14 +80,13 @@ def process_flight_search(origin, destination, date_out, date_return, trip_type,
 
 # ==========================================
 # 🖥️ القسم الثالث: الواجهة (Interface)
-# وظيفتها: أخذ المدخلات من المستخدم وعرض النتائج
+# وظيفتها: عرض العناصر على الشاشة واستقبال مدخلات المستخدم
 # ==========================================
 
-st.set_page_config(page_title="وكيل السفر الذكي", page_icon="✈️")
 st.title("✈️ وكيل السفر الذكي المتقدم")
 st.write("ابحث عن أفضل الرحلات المباشرة والترانزيت في مكان واحد.")
 
-# أخذ المعلومات من المستخدم
+# تقسيم المدخلات إلى عمودين لتنظيم المظهر
 col1, col2 = st.columns(2)
 with col1:
     origin = st.text_input("مدينة الانطلاق 🛫", placeholder="مثال: الرياض")
@@ -80,21 +100,8 @@ with col2:
         date_return = None
     cabin_class = st.selectbox("درجة الركوب 💺", ["الدرجة السياحية", "درجة الأعمال", "الدرجة الأولى"])
 
-# زر البحث
+# تفعيل زر البحث
 if st.button("ابحث عن أفضل 3 خيارات 🔍"):
     if origin and destination:
         with st.spinner("الإيجنت يبحث ويحلل البيانات الآن... ⏳"):
-            # إرسال البيانات للمنطق
-            final_results = process_flight_search(origin, destination, date_out, date_return, trip_type, cabin_class)
-            
-            # عرض النتائج
-            st.success("🎉 تم العثور على أفضل الخيارات لك:")
-            for i, flight in enumerate(final_results, 1):
-                st.subheader(f"الخيار رقم {i}: {flight['type']}")
-                st.write(f"🏢 **الشركة:** {flight['airline']}")
-                st.write(f"💰 **السعر:** {flight['price']} ريال")
-                st.write(f"⏱️ **المدة:** {flight['duration']}")
-                st.link_button("احجز الآن عبر Google Flights 🔗", flight['booking_url'])
-                st.divider()
-    else:
-        st.error("يرجى إدخال مدينتي الانطلاق والوصول.")
+            # إرسال البيانات إلى
