@@ -103,5 +103,6 @@ with col2:
 # تفعيل زر البحث
 if st.button("ابحث عن أفضل 3 خيارات 🔍"):
     if origin and destination:
-            with st.spinner("الإيجنت يبحث ويحلل البيانات الآن... ⏳"):
-                # إرسال البيانات إلى
+with st.spinner("الإيجنت يبحث ويحلل البيانات الآن... ⏳"):
+            # إرسال البيانات إلى دالة المنطق
+            final_results = process_flight_search(...)
