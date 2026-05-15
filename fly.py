@@ -103,6 +103,18 @@ with col2:
 # تفعيل زر البحث
 if st.button("ابحث عن أفضل 3 خيارات 🔍"):
     if origin and destination:
-with st.spinner("الإيجنت يبحث ويحلل البيانات الآن... ⏳"):
+        with st.spinner("الإيجنت يبحث ويحلل البيانات الآن... ⏳"):
             # إرسال البيانات إلى دالة المنطق
-            final_results = process_flight_search(...)
+            final_results = process_flight_search(origin, destination, date_out, date_return, trip_type, cabin_class)
+            
+            # عرض المخرجات النهائية للمستخدم
+            st.success("🎉 تم العثور على أفضل الخيارات لك:")
+            for i, flight in enumerate(final_results, 1):
+                st.subheader(f"الخيار رقم {i}: {flight['type']}")
+                st.write(f"🏢 **الشركة:** {flight['airline']}")
+                st.write(f"💰 **السعر:** {flight['price']} ريال")
+                st.write(f"⏱️ **المدة:** {flight['duration']}")
+                st.link_button("احجز الآن عبر Google Flights 🔗", flight['booking_url'])
+                st.divider()
+    else:
+        st.error("يرجى إدخال مدينتي الانطلاق والوصول أولاً.")
