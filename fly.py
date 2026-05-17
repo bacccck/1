@@ -28,7 +28,7 @@ CITY_TO_IATA = {
 }
 cities_list = list(CITY_TO_IATA.keys())
 
-# قائمة الوجهات التي سيستكشفها الإيجنت تلقائياً في ميزة "السعر أولاً" (اخترنا 5 لتوفير رصيد الـ API)
+# قائمة الوجهات التي سيستكشفها الإيجنت تلقائياً
 EXPLORE_DESTINATIONS = {"دبي": "DXB", "القاهرة": "CAI", "اسطنبول": "IST", "عمان": "AMM", "الدوحة": "DOH"}
 
 def clean_and_get_iata(city_input):
@@ -36,13 +36,15 @@ def clean_and_get_iata(city_input):
     return CITY_TO_IATA.get(city, city.upper())
 
 def has_good_legroom(flight):
+    """تحليل مساحة الساقين (79 سم / 31 بوصة فأعلى)"""
     legroom_str = flight["flights"][0].get("legroom", "")
     if not legroom_str: return False 
     numbers = re.findall(r'\d+', legroom_str)
     if numbers:
         value = int(numbers[0])
-        if "cm" in legroom_str.lower() or "سم" in legroom_str: return value > 81
-        elif "in" in legroom_str.lower() or "بوصة" in legroom_str: return value > 32 
+        # تعديل الشرط ليصبح 79 سم أو 31 بوصة فأكثر
+        if "cm" in legroom_str.lower() or "سم" in legroom_str: return value >= 79
+        elif "in" in legroom_str.lower() or "بوصة" in legroom_str: return value >= 31 
     return False
 
 # ==========================================
@@ -120,26 +122,22 @@ def process_flight_search(origin, destination, date_out, date_return, trip_type,
 
 
 def process_price_first_search_anywhere(origin, approx_date):
-    """منطق البحث عن أرخص سعر في 'كل المدن' خلال 3 أيام"""
     origin_iata = clean_and_get_iata(origin)
     best_deals = []
     
-    # تحديد نطاق التواريخ (يوم قبل، نفس اليوم، يوم بعد)
     dates_to_check = [
         approx_date - timedelta(days=1),
         approx_date,
         approx_date + timedelta(days=1)
     ]
     
-    # الإيجنت يقوم بالمرور على كل مدينة وكل تاريخ
     for dest_name, dest_iata in EXPLORE_DESTINATIONS.items():
         for check_date in dates_to_check:
-            if check_date < date.today(): continue # تجاهل الماضي
+            if check_date < date.today(): continue 
                 
             data = fetch_all_flights_from_google(origin_iata, dest_iata, check_date)
             all_flights = data.get("best_flights", [])
             
-            # فلترة: نأخذ فقط الرحلات التي صنفها قوقل كـ "منخفضة السعر"
             is_price_low = False
             if "price_insights" in data and data["price_insights"].get("level") == "low":
                 is_price_low = True
@@ -161,9 +159,8 @@ def process_price_first_search_anywhere(origin, approx_date):
                         "arrival_time": arr_time,
                         "url": generate_real_google_flight_url(origin_iata, dest_iata, check_date)
                     })
-                    break # نكتفي بأرخص رحلة لكل مدينة/تاريخ لتجنب التكرار
+                    break 
                     
-    # ترتيب جميع الصفقات المستكشفة من الأرخص للأغلى
     return sorted(best_deals, key=lambda x: x['price'])
 
 
@@ -186,7 +183,8 @@ with tab1:
     with col2:
         dest1 = st.selectbox("إلى 🛬", options=cities_list, index=None, key="dest1")
         date_return1 = st.date_input("العودة 📅", min_value=date_out1) if trip_type == "ذهاب وعودة" else None
-        require_leg = st.checkbox("💺 أظهر فقط الطائرات ذات مساحة الساقين الواسعة (> 81 سم)")
+        # 👈 تحديث النص هنا
+        require_leg = st.checkbox("💺 أظهر فقط الطائرات ذات مساحة الساقين المريحة (79 سم فأعلى)")
 
     if st.button("ابحث 🔍", key="btn1"):
         if origin1 and dest1:
@@ -206,7 +204,7 @@ with tab1:
         else:
             st.error("اختر المدن أولاً.")
 
-# ----------------- التبويب الثاني (أينما كان) -----------------
+# ----------------- التبويب الثاني -----------------
 with tab2:
     st.write("🌍 **لا يهمك المكان؟** اختر الانطلاق والتاريخ التقريبي، وسنبحر في أشهر الوجهات لنجلب لك 'لقطة' السعر!")
     
@@ -216,11 +214,10 @@ with tab2:
     with col4:
         approx_date = st.date_input("تاريخ السفر التقريبي 📅", min_value=today, key="do2")
         
-    st.info("💡 سيبحث الإيجنت تلقائياً في: دبي، القاهرة، اسطنبول، عمان، والدوحة (لتوفير رصيد الـ API الخاص بك).")
+    st.info("💡 سيبحث الإيجنت تلقائياً في: دبي، القاهرة، اسطنبول، عمان، والدوحة.")
     
     if st.button("صِد لي أفضل سعر لأي مكان! 🎯", key="btn2"):
         if origin2:
-            # شريط التحميل سيبقى طويلاً قليلاً لأنه يبحث في 15 احتمالية (5 مدن × 3 أيام)
             with st.spinner("نقوم بمسح الأسعار في عدة دول لعدة أيام... استرخِ قليلاً ⏳"):
                 deals = process_price_first_search_anywhere(origin2, approx_date)
                 
