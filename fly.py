@@ -29,7 +29,7 @@ st.markdown("""
 # ==========================================
 
 def get_best_direct_flights(origin, destination, date_out):
-    """أداة تتصل بـ SerpApi لجلب أسعار حقيقية من قوقل فلايت 🌐"""
+    """أداة تتصل بـ SerpApi لجلب أسعار حقيقية من قوقل فلايت 🌐 مع خاصية اكتشاف الأخطاء"""
     url = "https://serpapi.com/search"
     params = {
         "engine": "google_flights",
@@ -37,7 +37,7 @@ def get_best_direct_flights(origin, destination, date_out):
         "arrival_id": destination,   
         "outbound_date": str(date_out), 
         "currency": "SAR",           
-        "hl": "ar", # طلب النتائج باللغة العربية
+        "hl": "ar", 
         "api_key": SERPAPI_KEY       
     }
     
@@ -46,10 +46,10 @@ def get_best_direct_flights(origin, destination, date_out):
         data = response.json()
         
         real_flights = []
-        # البحث عن أفضل الرحلات في الرد القادم من قوقل
+        
+        # 1. إذا وجد رحلات حقيقية
         if "best_flights" in data:
             for flight in data["best_flights"][:2]: # نأخذ أفضل نتيجتين
-                # استخراج البيانات بأمان
                 airline = flight["flights"][0].get("airline", "غير معروف")
                 price = flight.get("price", 0)
                 duration_mins = flight.get("total_duration", 0)
@@ -62,9 +62,18 @@ def get_best_direct_flights(origin, destination, date_out):
                     "price": price,
                     "duration": f"{duration_hours} ساعة"
                 })
-        return real_flights
+            return real_flights
+            
+        # 2. إذا رفض SerpApi المفتاح أو أرسل خطأ
+        elif "error" in data:
+            return [{"id": "Error", "type": "رسالة من SerpApi ⚠️", "airline": data["error"], "price": 0, "duration": "0"}]
+            
+        # 3. إذا لم يجد رحلات في هذا اليوم
+        else:
+            return [{"id": "Empty", "type": "تنبيه ⚠️", "airline": "لا توجد رحلات مباشرة في هذا اليوم", "price": 0, "duration": "0"}]
+            
     except Exception as e:
-        return [{"id": "Error", "type": "خطأ", "airline": "فشل الاتصال بالإنترنت", "price": 0, "duration": "0"}]
+        return [{"id": "Error", "type": "خطأ تقني", "airline": f"فشل الاتصال: {e}", "price": 0, "duration": "0"}]
 
 # أداة وهمية مؤقتاً
 def get_best_transit_flights(origin, destination, date_out):
@@ -88,16 +97,20 @@ def generate_google_flight_url(flight_id, origin, destination, date_out):
 def process_flight_search(origin, destination, date_out, date_return, trip_type, cabin_class):
     results = []
     
+    # 1. استدعاء الأدوات
     direct_flights = get_best_direct_flights(origin, destination, date_out)
     transit_flights = get_best_transit_flights(origin, destination, date_out)
     fastest_transit = get_shortest_transit_flight(origin, destination, date_out)
     
+    # 2. تجميع النتائج
     results.extend(direct_flights)
     results.extend(transit_flights)
     results.append(fastest_transit)
     
+    # 3. اختيار أفضل 3 نتائج
     top_3_flights = sorted(results, key=lambda x: x['price'])[:3]
     
+    # 4. توليد الروابط
     for flight in top_3_flights:
         url = generate_google_flight_url(flight['id'], origin, destination, date_out)
         flight['booking_url'] = url
@@ -136,9 +149,4 @@ if st.button("ابحث عن أفضل 3 خيارات 🔍"):
             for i, flight in enumerate(final_results, 1):
                 st.subheader(f"الخيار رقم {i}: {flight['type']}")
                 st.write(f"🏢 **الشركة:** {flight['airline']}")
-                st.write(f"💰 **السعر:** {flight['price']} ريال")
-                st.write(f"⏱️ **المدة:** {flight['duration']}")
-                st.link_button("احجز الآن عبر Google Flights 🔗", flight['booking_url'])
-                st.divider()
-    else:
-        st.error("يرجى إدخال أكواد مطاري الانطلاق والوصول أولاً.")
+                st.write(f"💰 **السعر:** {flight['
