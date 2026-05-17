@@ -1,32 +1,23 @@
 import streamlit as st
 import requests
-import urllib.parse  # مكتبة لتجهيز الروابط الحقيقية بشكل سليم
+import urllib.parse  
 
-# 🔐 جلب المفتاح السري بأمان من خزنة Streamlit
+# 🔐 جلب المفتاح السري 
 SERPAPI_KEY = st.secrets["SERPAPI_KEY"]
 
-# 🖥️ إعداد الصفحة وتحديد العنوان والأيقونة
+# 🖥️ إعداد الصفحة
 st.set_page_config(page_title="وكيل السفر الذكي", page_icon="✈️")
 
-# 🖥️ كود CSS لتغيير اتجاه الصفحة ليصبح من اليمين إلى اليسار (RTL)
 st.markdown("""
 <style>
-    .stApp {
-        direction: rtl;
-    }
-    p, div, input, select, label, h1, h2, h3 {
-        text-align: right !important;
-    }
-    .stButton>button {
-        display: block;
-        margin-right: 0;
-        margin-left: auto;
-    }
+    .stApp { direction: rtl; }
+    p, div, input, select, label, h1, h2, h3 { text-align: right !important; }
+    .stButton>button { display: block; margin-right: 0; margin-left: auto; }
 </style>
 """, unsafe_allow_html=True)
 
 # ==========================================
-# 🧠 قاموس ترجمة المدن العربية إلى أكواد المطارات العالمية
+# 🧠 قاموس المدن
 # ==========================================
 CITY_TO_IATA = {
     "الرياض": "RUH", "رياض": "RUH",
@@ -45,17 +36,13 @@ CITY_TO_IATA = {
 }
 
 def clean_and_get_iata(city_input):
-    """دالة تحول اسم المدينة بالعربي إلى كود مطار، وإذا كُتب الكود بالإنجليزي تتركه كما هو"""
     city = city_input.strip()
-    # البحث في القاموس، إذا لم يجد الاسم، يحول النص لحروف إنجليزية كبيرة
     return CITY_TO_IATA.get(city, city.upper())
 
 # ==========================================
-# 🛠️ القسم الأول: الأدوات (Tools) - نسخة حقيقية بالكامل 🌐
+# 🛠️ القسم الأول: الأدوات 
 # ==========================================
-
 def fetch_all_flights_from_google(origin_iata, destination_iata, date_out, date_return, trip_type):
-    """أداة رئيسية تتصل بـ SerpApi مرة واحدة لتجلب كل البيانات الحية"""
     url = "https://serpapi.com/search"
     type_code = "1" if trip_type == "ذهاب وعودة" else "2"
     
@@ -77,34 +64,30 @@ def fetch_all_flights_from_google(origin_iata, destination_iata, date_out, date_
     return response.json()
 
 def generate_real_google_flight_url(origin_iata, destination_iata, date_out, date_return, trip_type):
-    """أداة عبقرية تولد رابط بحث حقيقي ومباشر على موقع قوقل فلايت الرسمي"""
+    """تم تحديث الأداة لتوليد رابط قوقل فلايت الرسمي الصحيح 🔗"""
     if trip_type == "ذهاب وعودة" and date_return:
         query = f"Flights from {origin_iata} to {destination_iata} on {date_out} returning {date_return}"
     else:
         query = f"Flights from {origin_iata} to {destination_iata} on {date_out}"
     
     encoded_query = urllib.parse.quote(query)
-    return f"https://www.google.com/travel/flights?q={encoded_query}"
+    # استخدام الرابط الرسمي مع تحديد اللغة العربية والعملة بالريال
+    return f"https://www.google.com/travel/flights?q={encoded_query}&hl=ar&curr=SAR"
 
 
 # ==========================================
-# 🧠 القسم الثاني: المنطق (Logic)
-# وظيفته الفرز الذكي للبيانات الحقيقية المستلمة
+# 🧠 القسم الثاني: المنطق
 # ==========================================
-
 def process_flight_search(origin, destination, date_out, date_return, trip_type, cabin_class):
-    # 1. تحويل أسماء المدن العربية إلى أكواد مطارات
     origin_iata = clean_and_get_iata(origin)
     destination_iata = clean_and_get_iata(destination)
     
     try:
-        # 2. جلب البيانات الحية لمرة واحدة
         data = fetch_all_flights_from_google(origin_iata, destination_iata, date_out, date_return, trip_type)
         
         if "error" in data:
             return [{"type": "رسالة من النظام ⚠️", "airline": data["error"], "price": 0, "duration": "0", "url": "#"}]
             
-        # تجميع كل الرحلات القادمة من قوقل (الأفضل والأخرى)
         all_flights_raw = []
         if "best_flights" in data:
             all_flights_raw.extend(data["best_flights"])
@@ -117,14 +100,17 @@ def process_flight_search(origin, destination, date_out, date_return, trip_type,
         direct_flights = []
         transit_flights = []
         
-        # 3. المنطق يقوم بفرز وتصنيف الرحلات حقيقياً
         for flight in all_flights_raw:
+            price = flight.get("price")
+            
+            # 🛑 فلتر جديد: تجاهل أي رحلة لا تحتوي على سعر واضح!
+            if not price or price <= 0:
+                continue 
+                
             airline = flight["flights"][0].get("airline", "غير معروف")
-            price = flight.get("price", 0)
             duration_mins = flight.get("total_duration", 0)
             duration_hours = round(duration_mins / 60, 1)
             
-            # معرفة هل الرحلة ترانزيت أم مباشرة من خلال التحقق من وجود توقفات
             is_transit = "layovers" in flight and len(flight["layovers"]) > 0
             
             flight_info = {
@@ -140,31 +126,28 @@ def process_flight_search(origin, destination, date_out, date_return, trip_type,
             else:
                 direct_flights.append(flight_info)
                 
-        # 4. تفعيل جميع الأدوات والطلبات من القائمة الحقيقية
         results = []
         
-        # أداة الرحلات المباشرة (تأخذ أفضل سعرين مباشرين)
         if direct_flights:
             results.extend(sorted(direct_flights, key=lambda x: x['price'])[:2])
             
-        # أداة رحلات الترانزيت (تأخذ أفضل سعر ترانزيت)
         if transit_flights:
             results.extend(sorted(transit_flights, key=lambda x: x['price'])[:1])
             
-        # أداة أقصر وقت ترانزيت (تأخذ الرحلة الأسرع في الترانزيت وتغير نوعها)
         if transit_flights:
             fastest_transit = sorted(transit_flights, key=lambda x: x['duration_mins'])[0].copy()
             fastest_transit["type"] = "ترانزيت سريع (حقيقية 🌐)"
-            # نضيفها فقط إذا لم تكن هي نفسها رحلة الترانزيت الأرخص التي أضفناها سابقاً
             if fastest_transit not in results:
                 results.append(fastest_transit)
                 
-        # ترتيب الخيارات النهائية حسب السعر واختيار أفضل 3 خيارات للمستخدم
         final_top_3 = sorted(results, key=lambda x: x['price'])[:3]
         
-        # توليد روابط الحجز الحقيقية لكل رحلة
         for flight in final_top_3:
             flight["url"] = generate_real_google_flight_url(origin_iata, destination_iata, date_out, date_return, trip_type)
+            
+        # إذا كانت القائمة فارغة بعد تجاهل رحلات الصفر ريال
+        if not final_top_3:
+            return [{"type": "تنبيه ⚠️", "airline": "جميع الرحلات المتاحة في هذا اليوم لا تعرض أسعاراً للحجز المباشر", "price": 0, "duration": "0", "url": "#"}]
             
         return final_top_3
         
@@ -173,9 +156,8 @@ def process_flight_search(origin, destination, date_out, date_return, trip_type,
 
 
 # ==========================================
-# 🖥️ القسم الثالث: الواجهة (Interface)
+# 🖥️ القسم الثالث: الواجهة
 # ==========================================
-
 st.title("✈️ وكيل السفر الذكي المتكامل")
 st.write("ابحث باللغة العربية عن أفضل الرحلات المباشرة، الترانزيت، والأسرع وقتاً بروابط حجز حقيقية.")
 
