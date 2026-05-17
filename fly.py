@@ -1,6 +1,7 @@
 import streamlit as st
 import requests
-import urllib.parse  
+import urllib.parse
+from datetime import date  # 👈 مكتبة جديدة للتعامل مع تواريخ اليوم
 
 # 🔐 جلب المفتاح السري 
 SERPAPI_KEY = st.secrets["SERPAPI_KEY"]
@@ -17,23 +18,26 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==========================================
-# 🧠 قاموس المدن
+# 🧠 قاموس المدن للاقتراح التلقائي
 # ==========================================
 CITY_TO_IATA = {
-    "الرياض": "RUH", "رياض": "RUH",
-    "دبي": "DXB", "دبى": "DXB",
-    "جدة": "JED", "جده": "JED",
-    "القاهرة": "CAI", "قاهره": "CAI",
-    "الدمام": "DMM", "دمام": "DMM",
-    "الدوحة": "DOH", "دوحه": "DOH",
+    "الرياض": "RUH",
+    "دبي": "DXB",
+    "جدة": "JED",
+    "القاهرة": "CAI",
+    "الدمام": "DMM",
+    "الدوحة": "DOH",
     "الكويت": "KWI",
-    "المنامة": "BAH", "منامة": "BAH",
+    "المنامة": "BAH",
     "مسقط": "MCT",
     "عمان": "AMM",
     "لندن": "LHR",
     "باريس": "CDG",
-    "اسطنبول": "IST", "إسطنبول": "IST"
+    "اسطنبول": "IST"
 }
+
+# استخراج قائمة أسماء المدن لعرضها في صندوق البحث
+cities_list = list(CITY_TO_IATA.keys())
 
 def clean_and_get_iata(city_input):
     city = city_input.strip()
@@ -64,14 +68,14 @@ def fetch_all_flights_from_google(origin_iata, destination_iata, date_out, date_
     return response.json()
 
 def generate_real_google_flight_url(origin_iata, destination_iata, date_out, date_return, trip_type):
-    """تم تحديث الأداة لتوليد رابط قوقل فلايت الرسمي الصحيح 🔗"""
+    """توليد رابط بحث يوجه مباشرة لصفحة حجز Google Flights 🔗"""
     if trip_type == "ذهاب وعودة" and date_return:
         query = f"Flights from {origin_iata} to {destination_iata} on {date_out} returning {date_return}"
     else:
         query = f"Flights from {origin_iata} to {destination_iata} on {date_out}"
     
     encoded_query = urllib.parse.quote(query)
-    # استخدام الرابط الرسمي مع تحديد اللغة العربية والعملة بالريال
+    # 👈 استخدمنا الرابط المباشر لقسم السفر في قوقل
     return f"https://www.google.com/travel/flights?q={encoded_query}&hl=ar&curr=SAR"
 
 
@@ -103,7 +107,6 @@ def process_flight_search(origin, destination, date_out, date_return, trip_type,
         for flight in all_flights_raw:
             price = flight.get("price")
             
-            # 🛑 فلتر جديد: تجاهل أي رحلة لا تحتوي على سعر واضح!
             if not price or price <= 0:
                 continue 
                 
@@ -145,7 +148,6 @@ def process_flight_search(origin, destination, date_out, date_return, trip_type,
         for flight in final_top_3:
             flight["url"] = generate_real_google_flight_url(origin_iata, destination_iata, date_out, date_return, trip_type)
             
-        # إذا كانت القائمة فارغة بعد تجاهل رحلات الصفر ريال
         if not final_top_3:
             return [{"type": "تنبيه ⚠️", "airline": "جميع الرحلات المتاحة في هذا اليوم لا تعرض أسعاراً للحجز المباشر", "price": 0, "duration": "0", "url": "#"}]
             
@@ -161,31 +163,44 @@ def process_flight_search(origin, destination, date_out, date_return, trip_type,
 st.title("✈️ وكيل السفر الذكي المتكامل")
 st.write("ابحث باللغة العربية عن أفضل الرحلات المباشرة، الترانزيت، والأسرع وقتاً بروابط حجز حقيقية.")
 
+# تحديد تاريخ اليوم
+today = date.today()
+
 col1, col2 = st.columns(2)
 with col1:
-    origin = st.text_input("مدينة الانطلاق 🛫", placeholder="مثال: الرياض أو دبي")
-    date_out = st.date_input("تاريخ الذهاب 📅")
+    # 👈 استخدام القائمة المنسدلة للاقتراح التلقائي
+    origin = st.selectbox("مدينة الانطلاق 🛫", options=cities_list, index=None, placeholder="اكتب أو اختر المدينة...")
+    
+    # 👈 منع اختيار تاريخ ماضي
+    date_out = st.date_input("تاريخ الذهاب 📅", min_value=today)
+    
     trip_type = st.selectbox("نوع الرحلة 🔄", ["ذهاب فقط", "ذهاب وعودة"])
 with col2:
-    destination = st.text_input("مدينة الوصول 🛬", placeholder="مثال: دبي أو القاهرة")
+    destination = st.selectbox("مدينة الوصول 🛬", options=cities_list, index=None, placeholder="اكتب أو اختر المدينة...")
+    
     if trip_type == "ذهاب وعودة":
-        date_return = st.date_input("تاريخ العودة 📅")
+        # 👈 منع أن يكون تاريخ العودة قبل تاريخ الذهاب
+        date_return = st.date_input("تاريخ العودة 📅", min_value=date_out)
     else:
         date_return = None
+        
     cabin_class = st.selectbox("درجة الركوب 💺", ["الدرجة السياحية", "درجة الأعمال", "الدرجة الأولى"])
 
 if st.button("ابحث عن أفضل 3 خيارات ذكية 🔍"):
     if origin and destination:
-        with st.spinner("الإيجنت يترجم المدن، ويتصل بقوقل فلايت، ويحلل الخيارات الآن... ⏳"):
-            final_results = process_flight_search(origin, destination, date_out, date_return, trip_type, cabin_class)
-            
-            st.success("🎉 إليك أفضل النتائج الحقيقية التي تم العثور عليها وتصنيفها:")
-            for i, flight in enumerate(final_results, 1):
-                st.subheader(f"الخيار رقم {i}: {flight['type']}")
-                st.write(f"🏢 **الشركة:** {flight['airline']}")
-                st.write(f"💰 **السعر:** {flight['price']} ريال")
-                st.write(f"⏱️ **المدة الإجمالية:** {flight['duration']}")
-                st.link_button("اضغط هنا للحجز مباشرة عبر Google Flights 🔗", flight['url'])
-                st.divider()
+        if origin == destination:
+             st.error("⚠️ لا يمكن أن تكون مدينة الانطلاق هي نفسها مدينة الوصول!")
+        else:
+            with st.spinner("الإيجنت يترجم المدن، ويتصل بقوقل فلايت، ويحلل الخيارات الآن... ⏳"):
+                final_results = process_flight_search(origin, destination, date_out, date_return, trip_type, cabin_class)
+                
+                st.success("🎉 إليك أفضل النتائج الحقيقية التي تم العثور عليها وتصنيفها:")
+                for i, flight in enumerate(final_results, 1):
+                    st.subheader(f"الخيار رقم {i}: {flight['type']}")
+                    st.write(f"🏢 **الشركة:** {flight['airline']}")
+                    st.write(f"💰 **السعر:** {flight['price']} ريال")
+                    st.write(f"⏱️ **المدة الإجمالية:** {flight['duration']}")
+                    st.link_button("اضغط هنا للحجز مباشرة عبر Google Flights 🔗", flight['url'])
+                    st.divider()
     else:
-        st.error("يرجى إدخال مدينتي الانطلاق والوصول أولاً.")
+        st.error("يرجى اختيار مدينتي الانطلاق والوصول أولاً.")
