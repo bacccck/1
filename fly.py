@@ -1,52 +1,54 @@
 import streamlit as st
 import requests
 import urllib.parse
-from datetime import date  # 👈 مكتبة جديدة للتعامل مع تواريخ اليوم
+from datetime import date, timedelta
+import re
 
 # 🔐 جلب المفتاح السري 
 SERPAPI_KEY = st.secrets["SERPAPI_KEY"]
 
 # 🖥️ إعداد الصفحة
-st.set_page_config(page_title="وكيل السفر الذكي", page_icon="✈️")
+st.set_page_config(page_title="وكيل السفر الذكي", page_icon="✈️", layout="wide")
 
 st.markdown("""
 <style>
     .stApp { direction: rtl; }
-    p, div, input, select, label, h1, h2, h3 { text-align: right !important; }
+    p, div, input, select, label, h1, h2, h3, .stTabs { text-align: right !important; }
     .stButton>button { display: block; margin-right: 0; margin-left: auto; }
 </style>
 """, unsafe_allow_html=True)
 
 # ==========================================
-# 🧠 قاموس المدن للاقتراح التلقائي
+# 🧠 قواميس المدن
 # ==========================================
 CITY_TO_IATA = {
-    "الرياض": "RUH",
-    "دبي": "DXB",
-    "جدة": "JED",
-    "القاهرة": "CAI",
-    "الدمام": "DMM",
-    "الدوحة": "DOH",
-    "الكويت": "KWI",
-    "المنامة": "BAH",
-    "مسقط": "MCT",
-    "عمان": "AMM",
-    "لندن": "LHR",
-    "باريس": "CDG",
-    "اسطنبول": "IST"
+    "الرياض": "RUH", "دبي": "DXB", "جدة": "JED", "القاهرة": "CAI",
+    "الدمام": "DMM", "الدوحة": "DOH", "الكويت": "KWI", "المنامة": "BAH",
+    "مسقط": "MCT", "عمان": "AMM", "لندن": "LHR", "باريس": "CDG", "اسطنبول": "IST"
 }
-
-# استخراج قائمة أسماء المدن لعرضها في صندوق البحث
 cities_list = list(CITY_TO_IATA.keys())
+
+# قائمة الوجهات التي سيستكشفها الإيجنت تلقائياً في ميزة "السعر أولاً" (اخترنا 5 لتوفير رصيد الـ API)
+EXPLORE_DESTINATIONS = {"دبي": "DXB", "القاهرة": "CAI", "اسطنبول": "IST", "عمان": "AMM", "الدوحة": "DOH"}
 
 def clean_and_get_iata(city_input):
     city = city_input.strip()
     return CITY_TO_IATA.get(city, city.upper())
 
+def has_good_legroom(flight):
+    legroom_str = flight["flights"][0].get("legroom", "")
+    if not legroom_str: return False 
+    numbers = re.findall(r'\d+', legroom_str)
+    if numbers:
+        value = int(numbers[0])
+        if "cm" in legroom_str.lower() or "سم" in legroom_str: return value > 81
+        elif "in" in legroom_str.lower() or "بوصة" in legroom_str: return value > 32 
+    return False
+
 # ==========================================
 # 🛠️ القسم الأول: الأدوات 
 # ==========================================
-def fetch_all_flights_from_google(origin_iata, destination_iata, date_out, date_return, trip_type):
+def fetch_all_flights_from_google(origin_iata, destination_iata, date_out, date_return=None, trip_type="ذهاب فقط"):
     url = "https://serpapi.com/search"
     type_code = "1" if trip_type == "ذهاب وعودة" else "2"
     
@@ -61,146 +63,176 @@ def fetch_all_flights_from_google(origin_iata, destination_iata, date_out, date_
         "api_key": SERPAPI_KEY       
     }
     
-    if type_code == "1" and date_return:
-        params["return_date"] = str(date_return)
+    if type_code == "1" and date_return: params["return_date"] = str(date_return)
         
-    response = requests.get(url, params=params)
-    return response.json()
+    try:
+        response = requests.get(url, params=params)
+        return response.json()
+    except:
+        return {}
 
-def generate_real_google_flight_url(origin_iata, destination_iata, date_out, date_return, trip_type):
-    """توليد رابط بحث يوجه مباشرة لصفحة حجز Google Flights 🔗"""
+def generate_real_google_flight_url(origin_iata, destination_iata, date_out, date_return=None, trip_type="ذهاب فقط"):
     if trip_type == "ذهاب وعودة" and date_return:
         query = f"Flights from {origin_iata} to {destination_iata} on {date_out} returning {date_return}"
     else:
         query = f"Flights from {origin_iata} to {destination_iata} on {date_out}"
-    
     encoded_query = urllib.parse.quote(query)
-    # 👈 استخدمنا الرابط المباشر لقسم السفر في قوقل
     return f"https://www.google.com/travel/flights?q={encoded_query}&hl=ar&curr=SAR"
 
 
 # ==========================================
 # 🧠 القسم الثاني: المنطق
 # ==========================================
-def process_flight_search(origin, destination, date_out, date_return, trip_type, cabin_class):
+def process_flight_search(origin, destination, date_out, date_return, trip_type, require_legroom=False):
     origin_iata = clean_and_get_iata(origin)
     destination_iata = clean_and_get_iata(destination)
     
-    try:
-        data = fetch_all_flights_from_google(origin_iata, destination_iata, date_out, date_return, trip_type)
+    data = fetch_all_flights_from_google(origin_iata, destination_iata, date_out, date_return, trip_type)
+    if "error" in data: return [{"type": "خطأ", "airline": data["error"], "price": 0, "duration": "", "url": "#"}]
         
-        if "error" in data:
-            return [{"type": "رسالة من النظام ⚠️", "airline": data["error"], "price": 0, "duration": "0", "url": "#"}]
-            
-        all_flights_raw = []
-        if "best_flights" in data:
-            all_flights_raw.extend(data["best_flights"])
-        if "other_flights" in data:
-            all_flights_raw.extend(data["other_flights"])
-            
-        if not all_flights_raw:
-            return [{"type": "تنبيه ⚠️", "airline": "لا توجد رحلات متوفرة في هذا اليوم", "price": 0, "duration": "0", "url": "#"}]
-            
-        direct_flights = []
-        transit_flights = []
+    all_flights_raw = data.get("best_flights", []) + data.get("other_flights", [])
+    if not all_flights_raw: return []
         
-        for flight in all_flights_raw:
-            price = flight.get("price")
+    processed_flights = []
+    for flight in all_flights_raw:
+        price = flight.get("price")
+        if not price or price <= 0: continue
+        if require_legroom and not has_good_legroom(flight): continue
             
-            if not price or price <= 0:
-                continue 
+        airline = flight["flights"][0].get("airline", "غير معروف")
+        duration_mins = flight.get("total_duration", 0)
+        dep_time = flight["flights"][0].get("departure_airport", {}).get("time", "غير متوفر")
+        arr_time = flight["flights"][-1].get("arrival_airport", {}).get("time", "غير متوفر")
+        is_transit = "layovers" in flight and len(flight["layovers"]) > 0
+        
+        processed_flights.append({
+            "airline": airline,
+            "price": price,
+            "duration": f"{round(duration_mins / 60, 1)} ساعة",
+            "departure_time": dep_time,
+            "arrival_time": arr_time,
+            "type": "ترانزيت" if is_transit else "مباشرة",
+            "date": str(date_out),
+            "url": generate_real_google_flight_url(origin_iata, destination_iata, date_out, date_return, trip_type)
+        })
+        
+    return sorted(processed_flights, key=lambda x: x['price'])[:3]
+
+
+def process_price_first_search_anywhere(origin, approx_date):
+    """منطق البحث عن أرخص سعر في 'كل المدن' خلال 3 أيام"""
+    origin_iata = clean_and_get_iata(origin)
+    best_deals = []
+    
+    # تحديد نطاق التواريخ (يوم قبل، نفس اليوم، يوم بعد)
+    dates_to_check = [
+        approx_date - timedelta(days=1),
+        approx_date,
+        approx_date + timedelta(days=1)
+    ]
+    
+    # الإيجنت يقوم بالمرور على كل مدينة وكل تاريخ
+    for dest_name, dest_iata in EXPLORE_DESTINATIONS.items():
+        for check_date in dates_to_check:
+            if check_date < date.today(): continue # تجاهل الماضي
                 
-            airline = flight["flights"][0].get("airline", "غير معروف")
-            duration_mins = flight.get("total_duration", 0)
-            duration_hours = round(duration_mins / 60, 1)
+            data = fetch_all_flights_from_google(origin_iata, dest_iata, check_date)
+            all_flights = data.get("best_flights", [])
             
-            is_transit = "layovers" in flight and len(flight["layovers"]) > 0
-            
-            flight_info = {
-                "airline": airline,
-                "price": price,
-                "duration": f"{duration_hours} ساعة",
-                "duration_mins": duration_mins,
-                "type": "مباشرة (حقيقية 🌐)" if not is_transit else "ترانزيت (حقيقية 🌐)"
-            }
-            
-            if is_transit:
-                transit_flights.append(flight_info)
-            else:
-                direct_flights.append(flight_info)
+            # فلترة: نأخذ فقط الرحلات التي صنفها قوقل كـ "منخفضة السعر"
+            is_price_low = False
+            if "price_insights" in data and data["price_insights"].get("level") == "low":
+                is_price_low = True
+                    
+            for flight in all_flights:
+                price = flight.get("price")
+                if not price or price <= 0: continue
                 
-        results = []
-        
-        if direct_flights:
-            results.extend(sorted(direct_flights, key=lambda x: x['price'])[:2])
-            
-        if transit_flights:
-            results.extend(sorted(transit_flights, key=lambda x: x['price'])[:1])
-            
-        if transit_flights:
-            fastest_transit = sorted(transit_flights, key=lambda x: x['duration_mins'])[0].copy()
-            fastest_transit["type"] = "ترانزيت سريع (حقيقية 🌐)"
-            if fastest_transit not in results:
-                results.append(fastest_transit)
-                
-        final_top_3 = sorted(results, key=lambda x: x['price'])[:3]
-        
-        for flight in final_top_3:
-            flight["url"] = generate_real_google_flight_url(origin_iata, destination_iata, date_out, date_return, trip_type)
-            
-        if not final_top_3:
-            return [{"type": "تنبيه ⚠️", "airline": "جميع الرحلات المتاحة في هذا اليوم لا تعرض أسعاراً للحجز المباشر", "price": 0, "duration": "0", "url": "#"}]
-            
-        return final_top_3
-        
-    except Exception as e:
-        return [{"type": "خطأ تقني", "airline": f"فشل في تحليل البيانات: {e}", "price": 0, "duration": "0", "url": "#"}]
+                if is_price_low:
+                    dep_time = flight["flights"][0].get("departure_airport", {}).get("time", "غير متوفر")
+                    arr_time = flight["flights"][-1].get("arrival_airport", {}).get("time", "غير متوفر")
+                    
+                    best_deals.append({
+                        "destination": dest_name,
+                        "airline": flight["flights"][0].get("airline", "غير معروف"),
+                        "price": price,
+                        "date": str(check_date),
+                        "departure_time": dep_time,
+                        "arrival_time": arr_time,
+                        "url": generate_real_google_flight_url(origin_iata, dest_iata, check_date)
+                    })
+                    break # نكتفي بأرخص رحلة لكل مدينة/تاريخ لتجنب التكرار
+                    
+    # ترتيب جميع الصفقات المستكشفة من الأرخص للأغلى
+    return sorted(best_deals, key=lambda x: x['price'])
 
 
 # ==========================================
 # 🖥️ القسم الثالث: الواجهة
 # ==========================================
 st.title("✈️ وكيل السفر الذكي المتكامل")
-st.write("ابحث باللغة العربية عن أفضل الرحلات المباشرة، الترانزيت، والأسرع وقتاً بروابط حجز حقيقية.")
-
-# تحديد تاريخ اليوم
 today = date.today()
 
-col1, col2 = st.columns(2)
-with col1:
-    # 👈 استخدام القائمة المنسدلة للاقتراح التلقائي
-    origin = st.selectbox("مدينة الانطلاق 🛫", options=cities_list, index=None, placeholder="اكتب أو اختر المدينة...")
-    
-    # 👈 منع اختيار تاريخ ماضي
-    date_out = st.date_input("تاريخ الذهاب 📅", min_value=today)
-    
-    trip_type = st.selectbox("نوع الرحلة 🔄", ["ذهاب فقط", "ذهاب وعودة"])
-with col2:
-    destination = st.selectbox("مدينة الوصول 🛬", options=cities_list, index=None, placeholder="اكتب أو اختر المدينة...")
-    
-    if trip_type == "ذهاب وعودة":
-        # 👈 منع أن يكون تاريخ العودة قبل تاريخ الذهاب
-        date_return = st.date_input("تاريخ العودة 📅", min_value=date_out)
-    else:
-        date_return = None
-        
-    cabin_class = st.selectbox("درجة الركوب 💺", ["الدرجة السياحية", "درجة الأعمال", "الدرجة الأولى"])
+tab1, tab2 = st.tabs(["البحث الذكي المخصص 💺", "السعر أولاً 💰 (أينما كان)"])
 
-if st.button("ابحث عن أفضل 3 خيارات ذكية 🔍"):
-    if origin and destination:
-        if origin == destination:
-             st.error("⚠️ لا يمكن أن تكون مدينة الانطلاق هي نفسها مدينة الوصول!")
+# ----------------- التبويب الأول -----------------
+with tab1:
+    st.write("ابحث عن رحلتك المحددة مع خيار الراحة الإضافية.")
+    col1, col2 = st.columns(2)
+    with col1:
+        origin1 = st.selectbox("من 🛫", options=cities_list, index=None, key="orig1")
+        date_out1 = st.date_input("تاريخ الذهاب 📅", min_value=today, key="do1")
+        trip_type = st.selectbox("النوع 🔄", ["ذهاب فقط", "ذهاب وعودة"])
+    with col2:
+        dest1 = st.selectbox("إلى 🛬", options=cities_list, index=None, key="dest1")
+        date_return1 = st.date_input("العودة 📅", min_value=date_out1) if trip_type == "ذهاب وعودة" else None
+        require_leg = st.checkbox("💺 أظهر فقط الطائرات ذات مساحة الساقين الواسعة (> 81 سم)")
+
+    if st.button("ابحث 🔍", key="btn1"):
+        if origin1 and dest1:
+            if origin1 == dest1:
+                 st.error("⚠️ لا يمكن أن تكون مدينة الانطلاق هي نفسها مدينة الوصول!")
+            else:
+                with st.spinner("جاري البحث... ⏳"):
+                    results = process_flight_search(origin1, dest1, date_out1, date_return1, trip_type, require_leg)
+                    if not results:
+                        st.warning("⚠️ لم نجد رحلات تطابق شروطك.")
+                    else:
+                        for i, f in enumerate(results, 1):
+                            st.info(f"**الخيار {i}: {f['airline']}** | {f['type']}")
+                            st.write(f"💰 **السعر:** {f['price']} ريال")
+                            st.write(f"🕒 **المغادرة:** {f['departure_time']} | 🛬 **الوصول:** {f['arrival_time']} | ⏱️ **المدة:** {f['duration']}")
+                            st.link_button("احجز الآن 🔗", f['url'])
         else:
-            with st.spinner("الإيجنت يترجم المدن، ويتصل بقوقل فلايت، ويحلل الخيارات الآن... ⏳"):
-                final_results = process_flight_search(origin, destination, date_out, date_return, trip_type, cabin_class)
+            st.error("اختر المدن أولاً.")
+
+# ----------------- التبويب الثاني (أينما كان) -----------------
+with tab2:
+    st.write("🌍 **لا يهمك المكان؟** اختر الانطلاق والتاريخ التقريبي، وسنبحر في أشهر الوجهات لنجلب لك 'لقطة' السعر!")
+    
+    col3, col4 = st.columns(2)
+    with col3:
+        origin2 = st.selectbox("من 🛫", options=cities_list, index=None, key="orig2")
+    with col4:
+        approx_date = st.date_input("تاريخ السفر التقريبي 📅", min_value=today, key="do2")
+        
+    st.info("💡 سيبحث الإيجنت تلقائياً في: دبي، القاهرة، اسطنبول، عمان، والدوحة (لتوفير رصيد الـ API الخاص بك).")
+    
+    if st.button("صِد لي أفضل سعر لأي مكان! 🎯", key="btn2"):
+        if origin2:
+            # شريط التحميل سيبقى طويلاً قليلاً لأنه يبحث في 15 احتمالية (5 مدن × 3 أيام)
+            with st.spinner("نقوم بمسح الأسعار في عدة دول لعدة أيام... استرخِ قليلاً ⏳"):
+                deals = process_price_first_search_anywhere(origin2, approx_date)
                 
-                st.success("🎉 إليك أفضل النتائج الحقيقية التي تم العثور عليها وتصنيفها:")
-                for i, flight in enumerate(final_results, 1):
-                    st.subheader(f"الخيار رقم {i}: {flight['type']}")
-                    st.write(f"🏢 **الشركة:** {flight['airline']}")
-                    st.write(f"💰 **السعر:** {flight['price']} ريال")
-                    st.write(f"⏱️ **المدة الإجمالية:** {flight['duration']}")
-                    st.link_button("اضغط هنا للحجز مباشرة عبر Google Flights 🔗", flight['url'])
-                    st.divider()
-    else:
-        st.error("يرجى اختيار مدينتي الانطلاق والوصول أولاً.")
+                if deals:
+                    st.success("🎉 وجدنا لك هذه الوجهات بأسعار تعتبر 'أقل من المتوسط'!")
+                    for deal in deals:
+                        st.success(f"✈️ **الوجهة: إلى {deal['destination']}** | 📅 التاريخ: {deal['date']}")
+                        st.write(f"🏢 {deal['airline']} | 💰 **{deal['price']} ريال**")
+                        st.write(f"🕒 **المغادرة:** {deal['departure_time']} | 🛬 **الوصول:** {deal['arrival_time']}")
+                        st.link_button(f"احجز رحلتك إلى {deal['destination']} 🔗", deal['url'])
+                        st.divider()
+                else:
+                    st.warning("لم نجد أسعاراً 'أقل من المتوسط' في وجهات الاستكشاف لهذه الأيام. الأسعار تبدو عادية حالياً.")
+        else:
+            st.error("اختر مدينة الانطلاق أولاً.")
