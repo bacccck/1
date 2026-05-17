@@ -1,6 +1,9 @@
 import streamlit as st
 import requests
+
+# 🔐 جلب المفتاح السري بأمان من خزنة Streamlit
 SERPAPI_KEY = st.secrets["SERPAPI_KEY"]
+
 # 🖥️ إعداد الصفحة وتحديد العنوان والأيقونة
 st.set_page_config(page_title="وكيل السفر الذكي", page_icon="✈️")
 
@@ -13,7 +16,6 @@ st.markdown("""
     p, div, input, select, label, h1, h2, h3 {
         text-align: right !important;
     }
-    /* ضبط محاذاة أزرار البحث والحجز لليمين */
     .stButton>button {
         display: block;
         margin-right: 0;
@@ -24,54 +26,78 @@ st.markdown("""
 
 # ==========================================
 # 🛠️ القسم الأول: الأدوات (Tools)
-# وظيفتها: جلب البيانات فقط (بيانات وهمية للتجربة المبدئية)
 # ==========================================
 
 def get_best_direct_flights(origin, destination, date_out):
-    """أداة تجلب أفضل سعرين للرحلات المباشرة"""
-    return [
-        {"id": "D1", "type": "مباشرة", "airline": "الخطوط السعودية", "price": 1200, "duration": "ساعتان"},
-        {"id": "D2", "type": "مباشرة", "airline": "طيران ناس", "price": 1350, "duration": "ساعتان"}
-    ]
+    """أداة تتصل بـ SerpApi لجلب أسعار حقيقية من قوقل فلايت 🌐"""
+    url = "https://serpapi.com/search"
+    params = {
+        "engine": "google_flights",
+        "departure_id": origin,      
+        "arrival_id": destination,   
+        "outbound_date": str(date_out), 
+        "currency": "SAR",           
+        "hl": "ar", # طلب النتائج باللغة العربية
+        "api_key": SERPAPI_KEY       
+    }
+    
+    try:
+        response = requests.get(url, params=params)
+        data = response.json()
+        
+        real_flights = []
+        # البحث عن أفضل الرحلات في الرد القادم من قوقل
+        if "best_flights" in data:
+            for flight in data["best_flights"][:2]: # نأخذ أفضل نتيجتين
+                # استخراج البيانات بأمان
+                airline = flight["flights"][0].get("airline", "غير معروف")
+                price = flight.get("price", 0)
+                duration_mins = flight.get("total_duration", 0)
+                duration_hours = round(duration_mins / 60, 1)
+                
+                real_flights.append({
+                    "id": flight.get("departure_token", "N/A"),
+                    "type": "مباشرة (حقيقية 🌐)",
+                    "airline": airline,
+                    "price": price,
+                    "duration": f"{duration_hours} ساعة"
+                })
+        return real_flights
+    except Exception as e:
+        return [{"id": "Error", "type": "خطأ", "airline": "فشل الاتصال بالإنترنت", "price": 0, "duration": "0"}]
 
+# أداة وهمية مؤقتاً
 def get_best_transit_flights(origin, destination, date_out):
-    """أداة تجلب أفضل سعرين لرحلات الترانزيت"""
     return [
-        {"id": "T1", "type": "ترانزيت", "airline": "فلاي دبي", "price": 850, "duration": "6 ساعات"},
-        {"id": "T2", "type": "ترانزيت", "airline": "طيران الخليج", "price": 900, "duration": "5 ساعات"}
+        {"id": "T1", "type": "ترانزيت (وهمي)", "airline": "فلاي دبي", "price": 850, "duration": "6 ساعات"}
     ]
 
+# أداة وهمية مؤقتاً
 def get_shortest_transit_flight(origin, destination, date_out):
-    """أداة تجلب الرحلة ذات أقصر وقت ترانزيت"""
-    return {"id": "T3", "type": "ترانزيت سريع", "airline": "الخطوط القطرية", "price": 1500, "duration": "4 ساعات"}
+    return {"id": "T3", "type": "ترانزيت سريع (وهمي)", "airline": "الخطوط القطرية", "price": 1500, "duration": "4 ساعات"}
 
+# أداة توليد رابط وهمي مؤقتاً
 def generate_google_flight_url(flight_id, origin, destination, date_out):
-    """أداة تولد رابط حجز ديناميكي وهمي للتجربة"""
-    return f"https://www.google.com/travel/flights?q={origin}-to-{destination}-on-{date_out}"
+    return f"https://www.google.com/travel/flights"
 
 
 # ==========================================
 # 🧠 القسم الثاني: المنطق (Logic)
-# وظيفته: استلام الطلب، تشغيل الأدوات، وفلترة النتائج وترتيبها
 # ==========================================
 
 def process_flight_search(origin, destination, date_out, date_return, trip_type, cabin_class):
     results = []
     
-    # 1. استدعاء الأدوات لجلب البيانات
     direct_flights = get_best_direct_flights(origin, destination, date_out)
     transit_flights = get_best_transit_flights(origin, destination, date_out)
     fastest_transit = get_shortest_transit_flight(origin, destination, date_out)
     
-    # 2. تجميع النتائج في قائمة واحدة
     results.extend(direct_flights)
     results.extend(transit_flights)
     results.append(fastest_transit)
     
-    # 3. اختيار أفضل 3 نتائج بناءً على السعر الأقل
     top_3_flights = sorted(results, key=lambda x: x['price'])[:3]
     
-    # 4. توليد الروابط المنفصلة لكل رحلة من الثلاثة
     for flight in top_3_flights:
         url = generate_google_flight_url(flight['id'], origin, destination, date_out)
         flight['booking_url'] = url
@@ -81,34 +107,31 @@ def process_flight_search(origin, destination, date_out, date_return, trip_type,
 
 # ==========================================
 # 🖥️ القسم الثالث: الواجهة (Interface)
-# وظيفتها: عرض العناصر على الشاشة واستقبال مدخلات المستخدم
 # ==========================================
 
 st.title("✈️ وكيل السفر الذكي المتقدم")
 st.write("ابحث عن أفضل الرحلات المباشرة والترانزيت في مكان واحد.")
 
-# تقسيم المدخلات إلى عمودين لتنظيم المظهر
+st.info("💡 **تلميح:** يرجى استخدام أكواد المطارات العالمية. مثال: **RUH** للرياض، **DXB** لدبي، **JED** لجدة، **CAI** للقاهرة.")
+
 col1, col2 = st.columns(2)
 with col1:
-    origin = st.text_input("مدينة الانطلاق 🛫", placeholder="مثال: الرياض")
+    origin = st.text_input("كود مطار الانطلاق 🛫", placeholder="مثال: RUH")
     date_out = st.date_input("تاريخ الذهاب 📅")
     trip_type = st.selectbox("نوع الرحلة 🔄", ["ذهاب وعودة", "ذهاب فقط"])
 with col2:
-    destination = st.text_input("مدينة الوصول 🛬", placeholder="مثال: دبي")
+    destination = st.text_input("كود مطار الوصول 🛬", placeholder="مثال: DXB")
     if trip_type == "ذهاب وعودة":
         date_return = st.date_input("تاريخ العودة 📅")
     else:
         date_return = None
     cabin_class = st.selectbox("درجة الركوب 💺", ["الدرجة السياحية", "درجة الأعمال", "الدرجة الأولى"])
 
-# تفعيل زر البحث
 if st.button("ابحث عن أفضل 3 خيارات 🔍"):
     if origin and destination:
-        with st.spinner("الإيجنت يبحث ويحلل البيانات الآن... ⏳"):
-            # إرسال البيانات إلى دالة المنطق
+        with st.spinner("الإيجنت يبحث في قوقل فلايت ويحلل البيانات الآن... ⏳"):
             final_results = process_flight_search(origin, destination, date_out, date_return, trip_type, cabin_class)
             
-            # عرض المخرجات النهائية للمستخدم
             st.success("🎉 تم العثور على أفضل الخيارات لك:")
             for i, flight in enumerate(final_results, 1):
                 st.subheader(f"الخيار رقم {i}: {flight['type']}")
@@ -118,4 +141,4 @@ if st.button("ابحث عن أفضل 3 خيارات 🔍"):
                 st.link_button("احجز الآن عبر Google Flights 🔗", flight['booking_url'])
                 st.divider()
     else:
-        st.error("يرجى إدخال مدينتي الانطلاق والوصول أولاً.")
+        st.error("يرجى إدخال أكواد مطاري الانطلاق والوصول أولاً.")
