@@ -149,4 +149,9 @@ if st.button("ابحث عن أفضل 3 خيارات 🔍"):
             for i, flight in enumerate(final_results, 1):
                 st.subheader(f"الخيار رقم {i}: {flight['type']}")
                 st.write(f"🏢 **الشركة:** {flight['airline']}")
-                st.write(f"💰 **السعر:** {flight['
+                st.write(f"💰 **السعر:** {flight['price']} ريال")
+                st.write(f"⏱️ **المدة:** {flight['duration']}")
+                st.link_button("احجز الآن عبر Google Flights 🔗", flight['booking_url'])
+                st.divider()
+    else:
+        st.error("يرجى إدخال أكواد مطاري الانطلاق والوصول أولاً.")
