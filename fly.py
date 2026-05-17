@@ -1,6 +1,6 @@
 import streamlit as st
 import requests
-SERPAPI_KEY = "9b1b9404d4926323ee73fc060b37c890134e6739ed31fece7bb400bd95b1a7f0"
+SERPAPI_KEY = st.secrets["SERPAPI_KEY"]
 # 🖥️ إعداد الصفحة وتحديد العنوان والأيقونة
 st.set_page_config(page_title="وكيل السفر الذكي", page_icon="✈️")
 
